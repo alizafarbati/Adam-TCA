@@ -216,15 +216,17 @@ class AdamTCA(Optimizer):
         grad = param.grad
         grad_history = state.get("grad_history", [])
 
+        history_length = state.get("grad_history_count", len(grad_history))
+
         if grad is None:
             return {
                 "cosine_similarity": 0.0,
                 "curvature_alpha": 0.5,
                 "gradient_norm": 0.0,
                 "momentum_norm": exp_avg.norm(2).item(),
-                "history_length": len(grad_history),
-                "gradient_variance": self._compute_grad_variance(grad_history)
-                if grad_history else 0.0,
+                "history_length": history_length,
+                "gradient_variance": self._compute_grad_variance(state)
+                if history_length > 0 else 0.0,
             }
 
         grad_flat = grad.view(-1)
@@ -245,9 +247,9 @@ class AdamTCA(Optimizer):
             "curvature_alpha": alpha,
             "gradient_norm": grad_norm.item(),
             "momentum_norm": exp_avg_norm.item(),
-            "history_length": len(grad_history),
-            "gradient_variance": self._compute_grad_variance(grad_history)
-            if grad_history else 0.0,
+            "history_length": history_length,
+            "gradient_variance": self._compute_grad_variance(state)
+            if history_length > 0 else 0.0,
         }
 
     def get_global_curvature(self) -> Dict[str, float]:
@@ -352,8 +354,18 @@ class AdamTCA(Optimizer):
                     state["step"] = 0
                     state["exp_avg"] = torch.zeros_like(p)
                     state["exp_avg_sq"] = torch.zeros_like(p)
-                    if curvature_mode in ("variance", "hybrid"):
-                        state["grad_history"] = []
+
+                if curvature_mode in ("variance", "hybrid"):
+                    # Lazily initialize ring buffer for gradients
+                    if "grad_history_buffer" not in state and "grad_history" not in state:
+                        numel = p.numel()
+                        state["grad_history_buffer"] = torch.empty(
+                            (curvature_window, numel),
+                            device=p.device,
+                            dtype=p.dtype,
+                        )
+                        state["grad_history_idx"] = 0
+                        state["grad_history_count"] = 0
 
                 exp_avg: torch.Tensor = state["exp_avg"]
                 exp_avg_sq: torch.Tensor = state["exp_avg_sq"]
@@ -404,20 +416,39 @@ class AdamTCA(Optimizer):
 
                 # Variance-based curvature signal (if applicable)
                 if curvature_mode in ("variance", "hybrid"):
-                    grad_history: List[torch.Tensor] = state["grad_history"]
-                    # Store flattened grad on the same device (no CPU transfer)
-                    grad_history.append(grad.detach().clone().flatten())
-                    if len(grad_history) > curvature_window:
-                        grad_history.pop(0)
+                    if "grad_history_buffer" in state:
+                        # New ring buffer approach
+                        buffer: torch.Tensor = state["grad_history_buffer"]
+                        idx: int = state["grad_history_idx"]
+                        count: int = state["grad_history_count"]
 
-                    if len(grad_history) >= 2:
-                        # Compute normalized variance across history
-                        stacked = torch.stack(grad_history)  # (N, D)
-                        var_est = stacked.var(dim=0).mean().item()  # scalar
-                        # Normalize variance to [0, 1] via sigmoid-like scaling
-                        var_signal = 1.0 - (var_est / (var_est + 1.0 + eps))
+                        buffer[idx].copy_(grad.detach().view(-1))
+                        state["grad_history_idx"] = (idx + 1) % curvature_window
+                        if count < curvature_window:
+                            state["grad_history_count"] = count + 1
+                            count += 1
+
+                        if count >= 2:
+                            var_est = buffer[:count].var(dim=0).mean().item()
+                            var_signal = 1.0 - (var_est / (var_est + 1.0 + eps))
+                        else:
+                            var_signal = 1.0
                     else:
-                        var_signal = 1.0  # neutral when not enough history
+                        # Legacy backward compatibility for older state dicts
+                        grad_history: List[torch.Tensor] = state["grad_history"]
+                        # Store flattened grad on the same device (no CPU transfer)
+                        grad_history.append(grad.detach().clone().flatten())
+                        if len(grad_history) > curvature_window:
+                            grad_history.pop(0)
+
+                        if len(grad_history) >= 2:
+                            # Compute normalized variance across history
+                            stacked = torch.stack(grad_history)  # (N, D)
+                            var_est = stacked.var(dim=0).mean().item()  # scalar
+                            # Normalize variance to [0, 1] via sigmoid-like scaling
+                            var_signal = 1.0 - (var_est / (var_est + 1.0 + eps))
+                        else:
+                            var_signal = 1.0  # neutral when not enough history
 
                     if curvature_mode == "hybrid":
                         # Average cosine and variance signals
@@ -445,14 +476,26 @@ class AdamTCA(Optimizer):
 
     @staticmethod
     def _compute_grad_variance(
-        grad_history: List[torch.Tensor],
+        state: Dict[str, Any],
     ) -> float:
-        """Compute normalized variance from a list of stored gradient vectors."""
-        if len(grad_history) < 2:
-            return 0.0
-        try:
-            stacked = torch.stack(grad_history)
-            var_est = stacked.var(dim=0).mean().item()
-            return float(var_est)
-        except Exception:
-            return 0.0
+        """Compute normalized variance from the stored gradient vectors."""
+        if "grad_history_buffer" in state:
+            count = state.get("grad_history_count", 0)
+            if count < 2:
+                return 0.0
+            try:
+                buffer: torch.Tensor = state["grad_history_buffer"]
+                var_est = buffer[:count].var(dim=0).mean().item()
+                return float(var_est)
+            except Exception:
+                return 0.0
+        else:
+            grad_history: List[torch.Tensor] = state.get("grad_history", [])
+            if len(grad_history) < 2:
+                return 0.0
+            try:
+                stacked = torch.stack(grad_history)
+                var_est = stacked.var(dim=0).mean().item()
+                return float(var_est)
+            except Exception:
+                return 0.0
