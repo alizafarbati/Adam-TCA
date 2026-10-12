@@ -393,11 +393,13 @@ class AdamTCA(Optimizer):
                 grad_norm_val = grad_flat.norm(2)
                 exp_avg_norm_val = exp_avg_flat.norm(2)
 
-                if grad_norm_val.item() == 0 or exp_avg_norm_val.item() == 0:
-                    cos_sim = 0.0
-                else:
-                    cos_sim = torch.dot(grad_flat, exp_avg_flat) / (grad_norm_val * exp_avg_norm_val)
-                    cos_sim = cos_sim.clamp(-1.0, 1.0).item()
+                denom = grad_norm_val * exp_avg_norm_val
+                # Avoid division by zero and CPU-GPU sync without changing behavior
+                cos_sim = torch.where(
+                    denom == 0,
+                    torch.tensor(0.0, device=denom.device, dtype=denom.dtype),
+                    (torch.dot(grad_flat, exp_avg_flat) / denom).clamp(-1.0, 1.0)
+                )
 
                 # Base alpha: maps [-1, 1] -> [0, 1]
                 alpha = (1.0 + cos_sim) / 2.0
