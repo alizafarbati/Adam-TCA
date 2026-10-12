@@ -413,7 +413,7 @@ class AdamTCA(Optimizer):
                     if len(grad_history) >= 2:
                         # Compute normalized variance across history
                         stacked = torch.stack(grad_history)  # (N, D)
-                        var_est = stacked.var(dim=0).mean().item()  # scalar
+                        var_est = stacked.var(dim=0).mean()  # scalar tensor
                         # Normalize variance to [0, 1] via sigmoid-like scaling
                         var_signal = 1.0 - (var_est / (var_est + 1.0 + eps))
                     else:
@@ -452,7 +452,7 @@ class AdamTCA(Optimizer):
             return 0.0
         try:
             stacked = torch.stack(grad_history)
-            var_est = stacked.var(dim=0).mean().item()
-            return float(var_est)
+            var_est = stacked.var(dim=0).mean()
+            return float(var_est.item())
         except Exception:
             return 0.0
