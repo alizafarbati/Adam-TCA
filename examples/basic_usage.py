@@ -19,7 +19,7 @@ from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
 
 from adam_tca import AdamTCA
 
