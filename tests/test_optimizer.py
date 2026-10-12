@@ -288,6 +288,16 @@ class TestAdamTCAStep:
         result = optimizer.step(closure)
         assert result is None
 
+    def test_closure_raises_exception(self, simple_model: nn.Linear) -> None:
+        """Verify that an exception raised within a closure propagates correctly."""
+        optimizer = AdamTCA(simple_model.parameters(), lr=0.01)
+
+        def closure() -> float:
+            raise RuntimeError("Intentional exception in closure")
+
+        with pytest.raises(RuntimeError, match="Intentional exception in closure"):
+            optimizer.step(closure)
+
     def test_multiple_steps(self, simple_model: nn.Linear,
                             small_input: torch.Tensor) -> None:
         """Verify that multiple steps run without error."""
