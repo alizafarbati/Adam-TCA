@@ -18,7 +18,8 @@ Features:
 from __future__ import annotations
 
 import math
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from collections import deque
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union, Deque
 
 import torch
 from torch.optim import Optimizer
@@ -214,7 +215,7 @@ class AdamTCA(Optimizer):
 
         exp_avg = state["exp_avg"]
         grad = param.grad
-        grad_history = state.get("grad_history", [])
+        grad_history = state.get("grad_history", deque())
 
         if grad is None:
             return {
@@ -223,7 +224,7 @@ class AdamTCA(Optimizer):
                 "gradient_norm": 0.0,
                 "momentum_norm": exp_avg.norm(2).item(),
                 "history_length": len(grad_history),
-                "gradient_variance": self._compute_grad_variance(grad_history)
+                "gradient_variance": self._compute_grad_variance(tuple(grad_history))
                 if grad_history else 0.0,
             }
 
@@ -246,7 +247,7 @@ class AdamTCA(Optimizer):
             "gradient_norm": grad_norm.item(),
             "momentum_norm": exp_avg_norm.item(),
             "history_length": len(grad_history),
-            "gradient_variance": self._compute_grad_variance(grad_history)
+            "gradient_variance": self._compute_grad_variance(tuple(grad_history))
             if grad_history else 0.0,
         }
 
@@ -353,7 +354,7 @@ class AdamTCA(Optimizer):
                     state["exp_avg"] = torch.zeros_like(p)
                     state["exp_avg_sq"] = torch.zeros_like(p)
                     if curvature_mode in ("variance", "hybrid"):
-                        state["grad_history"] = []
+                        state["grad_history"] = deque(maxlen=curvature_window)
 
                 exp_avg: torch.Tensor = state["exp_avg"]
                 exp_avg_sq: torch.Tensor = state["exp_avg_sq"]
@@ -404,15 +405,13 @@ class AdamTCA(Optimizer):
 
                 # Variance-based curvature signal (if applicable)
                 if curvature_mode in ("variance", "hybrid"):
-                    grad_history: List[torch.Tensor] = state["grad_history"]
+                    grad_history: Deque[torch.Tensor] = state["grad_history"]
                     # Store flattened grad on the same device (no CPU transfer)
                     grad_history.append(grad.detach().clone().flatten())
-                    if len(grad_history) > curvature_window:
-                        grad_history.pop(0)
 
                     if len(grad_history) >= 2:
                         # Compute normalized variance across history
-                        stacked = torch.stack(grad_history)  # (N, D)
+                        stacked = torch.stack(tuple(grad_history))  # (N, D)
                         var_est = stacked.var(dim=0).mean().item()  # scalar
                         # Normalize variance to [0, 1] via sigmoid-like scaling
                         var_signal = 1.0 - (var_est / (var_est + 1.0 + eps))
@@ -445,7 +444,7 @@ class AdamTCA(Optimizer):
 
     @staticmethod
     def _compute_grad_variance(
-        grad_history: List[torch.Tensor],
+        grad_history: Tuple[torch.Tensor, ...],
     ) -> float:
         """Compute normalized variance from a list of stored gradient vectors."""
         if len(grad_history) < 2:
