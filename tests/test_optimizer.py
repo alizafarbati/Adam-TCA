@@ -18,7 +18,7 @@ Covers:
 from __future__ import annotations
 
 import math
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pytest
 import torch
