@@ -540,6 +540,18 @@ class TestCurvatureModulation:
         info = optimizer.get_global_curvature()
         assert isinstance(info["cosine_similarity"], float)
 
+    def test_get_curvature_unmanaged_parameter(self, simple_model: nn.Linear) -> None:
+        """Verify get_curvature behaves correctly for parameters not in the optimizer."""
+        optimizer = AdamTCA(simple_model.parameters())
+        unmanaged_param = torch.nn.Parameter(torch.randn(5, 5))
+        info = optimizer.get_curvature(unmanaged_param)
+        assert info["cosine_similarity"] == 0.0
+        assert info["curvature_alpha"] == 0.5
+        assert info["gradient_norm"] == 0.0
+        assert info["momentum_norm"] == 0.0
+        assert info["history_length"] == 0
+        assert info["gradient_variance"] == 0.0
+
     def test_curvature_tracks_over_steps(self) -> None:
         """Verify that curvature values change over training steps."""
         model = nn.Linear(5, 1)
