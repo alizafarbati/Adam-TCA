@@ -533,6 +533,55 @@ class TestCurvatureModulation:
             info = optimizer.get_curvature(p)
             assert info["cosine_similarity"] == 0.0
             assert info["curvature_alpha"] == 0.5
+            assert info["gradient_norm"] == 0.0
+            assert info["momentum_norm"] == 0.0
+            assert info["history_length"] == 0
+            assert info["gradient_variance"] == 0.0
+
+    def test_get_curvature_exact_values(self) -> None:
+        """Verify exactly computed values from get_curvature based on controlled state."""
+        param = nn.Parameter(torch.tensor([1.0, 2.0, 3.0]))
+        optimizer = AdamTCA([param], curvature_mode="variance")
+
+        # Manually populate state
+        grad = torch.tensor([1.0, 0.0, 0.0])
+        param.grad = grad
+        exp_avg = torch.tensor([1.0, 1.0, 0.0])
+
+        # grad history for variance
+        grad_history = [
+            torch.tensor([1.0, 0.0, 0.0]),
+            torch.tensor([0.0, 1.0, 0.0])
+        ]
+
+        optimizer.state[param] = {
+            "exp_avg": exp_avg,
+            "grad_history": grad_history
+        }
+
+        info = optimizer.get_curvature(param)
+
+        # Calculate expected values
+        grad_norm = 1.0
+        exp_avg_norm = math.sqrt(2.0)
+        # cos_sim = dot(grad, exp_avg) / (grad_norm * exp_avg_norm) = 1.0 / (1.0 * sqrt(2)) = 1 / sqrt(2) ~ 0.707106
+        expected_cos_sim = 1.0 / math.sqrt(2.0)
+        expected_alpha = (1.0 + expected_cos_sim) / 2.0
+
+        assert math.isclose(info["cosine_similarity"], expected_cos_sim, rel_tol=1e-5)
+        assert math.isclose(info["curvature_alpha"], expected_alpha, rel_tol=1e-5)
+        assert math.isclose(info["gradient_norm"], grad_norm, rel_tol=1e-5)
+        assert math.isclose(info["momentum_norm"], exp_avg_norm, rel_tol=1e-5)
+        assert info["history_length"] == 2
+
+        # For variance: stacked = [[1, 0, 0], [0, 1, 0]]
+        # var(dim=0):
+        # var([1, 0]) = 0.5
+        # var([0, 1]) = 0.5
+        # var([0, 0]) = 0.0
+        # mean of var = (0.5 + 0.5 + 0.0) / 3 = 1.0 / 3.0 ~ 0.3333333
+        expected_variance = 1.0 / 3.0
+        assert math.isclose(info["gradient_variance"], expected_variance, rel_tol=1e-5)
 
     def test_global_curvature_before_step(self, simple_model: nn.Linear) -> None:
         """Verify global curvature is safe before any step."""
