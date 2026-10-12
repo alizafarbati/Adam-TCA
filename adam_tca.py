@@ -450,9 +450,6 @@ class AdamTCA(Optimizer):
         """Compute normalized variance from a list of stored gradient vectors."""
         if len(grad_history) < 2:
             return 0.0
-        try:
-            stacked = torch.stack(grad_history)
-            var_est = stacked.var(dim=0).mean().item()
-            return float(var_est)
-        except Exception:
-            return 0.0
+        stacked = torch.stack(grad_history)
+        var_est = stacked.var(dim=0).mean().item()
+        return float(var_est)
