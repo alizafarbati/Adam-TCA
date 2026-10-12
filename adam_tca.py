@@ -223,7 +223,7 @@ class AdamTCA(Optimizer):
                 "gradient_norm": 0.0,
                 "momentum_norm": exp_avg.norm(2).item(),
                 "history_length": len(grad_history),
-                "gradient_variance": self._compute_grad_variance(grad_history)
+                "gradient_variance": self._compute_grad_variance(grad_history, "").item()
                 if grad_history else 0.0,
             }
 
@@ -246,7 +246,7 @@ class AdamTCA(Optimizer):
             "gradient_norm": grad_norm.item(),
             "momentum_norm": exp_avg_norm.item(),
             "history_length": len(grad_history),
-            "gradient_variance": self._compute_grad_variance(grad_history)
+            "gradient_variance": self._compute_grad_variance(grad_history, "").item()
             if grad_history else 0.0,
         }
 
@@ -443,16 +443,24 @@ class AdamTCA(Optimizer):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
     def _compute_grad_variance(
-        grad_history: List[torch.Tensor],
-    ) -> float:
-        """Compute normalized variance from a list of stored gradient vectors."""
-        if len(grad_history) < 2:
-            return 0.0
+        self, grads: List[torch.Tensor], param_name: str
+    ) -> torch.Tensor:
+        """
+        Compute variance of gradients over the curvature window.
+
+        Args:
+            grads: List of historical gradients
+            param_name: Name of the parameter
+
+        Returns:
+            Variance tensor
+        """
+        if not grads or len(grads) < 2:
+            return torch.tensor(0.0)
         try:
-            stacked = torch.stack(grad_history)
-            var_est = stacked.var(dim=0).mean().item()
-            return float(var_est)
+            stacked = torch.stack(grads)
+            var_est = stacked.var(dim=0).mean()
+            return var_est
         except Exception:
-            return 0.0
+            return torch.tensor(0.0)

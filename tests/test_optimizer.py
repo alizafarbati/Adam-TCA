@@ -1068,3 +1068,42 @@ class TestMultiGPU:
 
         for p in model.parameters():
             assert p.isfinite().all()
+
+class TestComputeGradVariance:
+    """Tests for the _compute_grad_variance method."""
+
+    def test_empty_grad_history(self) -> None:
+        """Test variance with empty history is 0.0."""
+        variance = AdamTCA._compute_grad_variance(None, [], "")
+        assert variance == 0.0
+
+    def test_single_item_history(self) -> None:
+        """Test variance with single item history is 0.0."""
+        history = [torch.tensor([1.0, 2.0])]
+        variance = AdamTCA._compute_grad_variance(None, history, "")
+        assert variance == 0.0
+
+    def test_valid_grad_history(self) -> None:
+        """Test variance computes correctly for valid history."""
+        # 3 tensors, shape (2,)
+        # t1 = [1.0, 2.0], t2 = [3.0, 4.0], t3 = [5.0, 6.0]
+        # dim=0 variance for [1, 3, 5] is 4.0
+        # dim=0 variance for [2, 4, 6] is 4.0
+        # mean variance is 4.0
+        history = [
+            torch.tensor([1.0, 2.0]),
+            torch.tensor([3.0, 4.0]),
+            torch.tensor([5.0, 6.0]),
+        ]
+        variance = AdamTCA._compute_grad_variance(None, history, "")
+        assert math.isclose(variance, 4.0)
+
+    def test_invalid_grad_history(self) -> None:
+        """Test variance handles exceptions by returning 0.0."""
+        # Different shapes will cause torch.stack to fail
+        history = [
+            torch.tensor([1.0, 2.0]),
+            torch.tensor([1.0, 2.0, 3.0]),
+        ]
+        variance = AdamTCA._compute_grad_variance(None, history, "")
+        assert variance == 0.0
