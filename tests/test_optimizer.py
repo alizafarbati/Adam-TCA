@@ -540,6 +540,14 @@ class TestCurvatureModulation:
         info = optimizer.get_global_curvature()
         assert isinstance(info["cosine_similarity"], float)
 
+    def test_global_curvature_empty_state(self) -> None:
+        """Verify global curvature handles no params or grads."""
+        model = nn.Linear(10, 2)
+        optimizer = AdamTCA(model.parameters())
+        info = optimizer.get_global_curvature()
+        for key, value in info.items():
+            assert value == 0.0, f"Expected {key} to be 0.0, got {value}"
+
     def test_curvature_tracks_over_steps(self) -> None:
         """Verify that curvature values change over training steps."""
         model = nn.Linear(5, 1)
