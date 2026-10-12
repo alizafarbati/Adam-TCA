@@ -393,11 +393,8 @@ class AdamTCA(Optimizer):
                 grad_norm_val = grad_flat.norm(2)
                 exp_avg_norm_val = exp_avg_flat.norm(2)
 
-                if grad_norm_val.item() == 0 or exp_avg_norm_val.item() == 0:
-                    cos_sim = 0.0
-                else:
-                    cos_sim = torch.dot(grad_flat, exp_avg_flat) / (grad_norm_val * exp_avg_norm_val)
-                    cos_sim = cos_sim.clamp(-1.0, 1.0).item()
+                denom = grad_norm_val * exp_avg_norm_val
+                cos_sim = (torch.dot(grad_flat, exp_avg_flat) / denom).nan_to_num(0.0).clamp(-1.0, 1.0)
 
                 # Base alpha: maps [-1, 1] -> [0, 1]
                 alpha = (1.0 + cos_sim) / 2.0
@@ -413,7 +410,7 @@ class AdamTCA(Optimizer):
                     if len(grad_history) >= 2:
                         # Compute normalized variance across history
                         stacked = torch.stack(grad_history)  # (N, D)
-                        var_est = stacked.var(dim=0).mean().item()  # scalar
+                        var_est = stacked.var(dim=0).mean()  # scalar tensor
                         # Normalize variance to [0, 1] via sigmoid-like scaling
                         var_signal = 1.0 - (var_est / (var_est + 1.0 + eps))
                     else:
