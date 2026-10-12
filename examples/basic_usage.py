@@ -13,7 +13,6 @@ Demonstrates:
 from __future__ import annotations
 
 import math
-import sys
 import time
 from typing import Dict, List, Optional
 
