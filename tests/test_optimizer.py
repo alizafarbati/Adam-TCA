@@ -23,6 +23,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 import pytest
 import torch
 import torch.nn as nn
+import unittest.mock
 
 from adam_tca import AdamTCA
 
@@ -513,18 +514,53 @@ class TestCurvatureModulation:
 
     def test_global_curvature(self, simple_model: nn.Linear,
                                small_input: torch.Tensor) -> None:
-        """Verify that global curvature stats are available."""
+        """Verify that global curvature stats are correctly aggregated."""
         optimizer = AdamTCA(simple_model.parameters())
         output = simple_model(small_input)
         loss = output.sum()
         loss.backward()
         optimizer.step()
 
-        global_info = optimizer.get_global_curvature()
-        for key in ("cosine_similarity", "curvature_alpha", "gradient_norm",
-                     "momentum_norm", "history_length", "gradient_variance"):
-            assert key in global_info, f"Missing key: {key}"
-        assert isinstance(global_info["cosine_similarity"], float)
+        # Mock the get_curvature method to return deterministic values for each parameter
+        # to ensure that the aggregation logic is computing the average.
+        params = list(simple_model.parameters())
+        # We need at least 2 parameters to test aggregation
+        assert len(params) >= 2
+
+        param_infos = []
+        for i, p in enumerate(params):
+            info = {
+                "cosine_similarity": 0.1 * (i + 1),
+                "curvature_alpha": 0.2 * (i + 1),
+                "gradient_norm": 1.0 * (i + 1),
+                "momentum_norm": 2.0 * (i + 1),
+                "history_length": 10.0 * (i + 1),
+                "gradient_variance": 0.05 * (i + 1),
+            }
+            param_infos.append(info)
+
+        def mock_get_curvature(p):
+            for i, param in enumerate(params):
+                if p is param:
+                    return param_infos[i]
+            return param_infos[0]
+
+        with unittest.mock.patch.object(optimizer, 'get_curvature', side_effect=mock_get_curvature):
+            global_info = optimizer.get_global_curvature()
+
+            # Assert keys are present
+            expected_keys = ("cosine_similarity", "curvature_alpha", "gradient_norm",
+                             "momentum_norm", "history_length", "gradient_variance")
+            for key in expected_keys:
+                assert key in global_info, f"Missing key: {key}"
+
+            # Assert that the aggregation is exactly the mean of all parameters
+            for key in expected_keys:
+                expected_mean = sum(info[key] for info in param_infos) / len(param_infos)
+                # Allowing some floating point differences
+                assert abs(global_info[key] - expected_mean) < 1e-6, \
+                    f"Mismatch for {key}: expected {expected_mean}, got {global_info[key]}"
+
 
     def test_curvature_before_step(self, simple_model: nn.Linear) -> None:
         """Verify that curvature info is safe before any step."""
